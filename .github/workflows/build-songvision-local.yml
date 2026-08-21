@@ -1,0 +1,75 @@
+name: Build SongVision on local runner
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.songvision-run'
+      - '.github/workflows/build-songvision-local.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - '.songvision-run'
+      - '.github/workflows/build-songvision-local.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-songvision:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 60
+
+    steps:
+      - name: Identify SongVision runner
+        shell: pwsh
+        run: |
+          Write-Host "Runner: $env:RUNNER_NAME"
+          Write-Host "Repository: $env:GITHUB_REPOSITORY"
+          if ($env:GITHUB_REPOSITORY -ne 'stevepcave68-sudo/songvision') {
+            throw "This workflow belongs only to the SongVision repository."
+          }
+
+      - name: Inspect SongVision workspace
+        shell: pwsh
+        run: |
+          $workspace = 'D:\songvision'
+          if (-not (Test-Path $workspace)) {
+            throw "$workspace does not exist."
+          }
+          Write-Host "$workspace contents:"
+          Get-ChildItem $workspace -Force | Select-Object Name,Length,Mode | Format-Table -AutoSize
+          if (-not (Test-Path "$workspace\PUBLISH_SONGVISION.bat")) {
+            throw 'PUBLISH_SONGVISION.bat is not present in D:\songvision.'
+          }
+
+      - name: Build test and publish SongVision
+        shell: cmd
+        working-directory: D:\songvision
+        env:
+          CI: "true"
+        run: call PUBLISH_SONGVISION.bat ^< NUL
+
+      - name: Smoke published SongVision EXE
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'D:\songvision\DIST\SongVision\SongVision.App.exe'
+          if (-not (Test-Path $exe)) { throw "Published EXE missing: $exe" }
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 8
+          if ($p.HasExited) { throw "SongVision exited during smoke launch with code $($p.ExitCode)." }
+          Stop-Process -Id $p.Id -Force
+          Write-Host 'SONGVISION WINDOWED SMOKE OK'
+
+      - name: SongVision integrity summary
+        shell: pwsh
+        run: |
+          $exe = 'D:\songvision\DIST\SongVision\SongVision.App.exe'
+          $hash = (Get-FileHash -Algorithm SHA256 $exe).Hash
+          Write-Host "SONGVISION_BUILD_OK=1"
+          Write-Host "SONGVISION_EXE=$exe"
+          Write-Host "SONGVISION_SHA256=$hash"
